@@ -14,6 +14,7 @@ from .core import (
     cg_step,
     optimise,
     round_gw,
+    scale_problem
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "cg_step",
     "optimise",
     "round_gw",
+    "scale_problem"
 ]

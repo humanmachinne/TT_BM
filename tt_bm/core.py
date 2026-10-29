@@ -20,22 +20,57 @@ def mpo_vec(mpo: MPO, vec: Tensor) -> Tensor:
     """Apply an MPO to a vector: result = MPO @ vec."""
     res = vec.clone().reshape(1, -1, 1)
     dim = len(mpo)
+    phys = torch.tensor([mpo[i].shape[2] for i in range(dim)])
+    left_prod = 1
+
     for i in range(dim):
-        res = res.reshape(res.shape[0], 2**i, 2, 2**(dim - i - 1), res.shape[-1])
+        right_prod = phys[i+1:].prod().item()
+        res = res.reshape(res.shape[0], left_prod, phys[i], right_prod, res.shape[-1])
         res = torch.einsum('inmj,lompi->lonpj', mpo[i], res)
+        left_prod *= phys[i].item()
+
     return res.flatten()
+
+def estimate_op_norm(mpo: MPO, n_iter: int = 20) -> float:
+    """Estimate ||MPO||_op via power iteration using mpo_vec."""
+    n = 1
+    for core in mpo:
+        n *= core.shape[2]
+    dtype, device = mpo[0].dtype, mpo[0].device
+    v = torch.randn(n, dtype=dtype, device=device)
+    v = v / v.norm()
+    for _ in range(n_iter):
+        w = mpo_vec(mpo, v)
+        sigma = w.norm()
+        v = w / sigma
+    return sigma.item()
+
+
+def scale_problem(mpo: MPO, h: Tensor) -> Tuple[MPO, Tensor, float]:
+    """Scale J_mpo and h by 1/||J||_op.  Returns (mpo_scaled, h_scaled, scale_factor)."""
+    sigma = estimate_op_norm(mpo)
+    mpo_scaled = [core.clone() for core in mpo]
+    mpo_scaled[0] = mpo_scaled[0] / sigma   # absorb scalar into first core
+    h_scaled = h / sigma
+    return mpo_scaled, h_scaled, sigma
 
 
 def mpo_matrix(mpo: MPO, M: Tensor) -> Tensor:
     """Apply an MPO to each column of a matrix: result = MPO @ M."""
     res = M.clone().reshape(1, M.shape[0], M.shape[1], 1)
     dim = len(mpo)
+    phys = torch.tensor([mpo[i].shape[2] for i in range(dim)])
+    left_prod = 1
+
     for i in range(dim):
+        right_prod = phys[i+1:].prod().item()
         res = res.reshape(
-            res.shape[0], 2**i, 2, 2**(dim - i - 1),
+            res.shape[0], left_prod, phys[i], right_prod,
             res.shape[-2], res.shape[-1],
         )
         res = torch.einsum('inmj,lompbi->lonpbj', mpo[i], res)
+        left_prod *= phys[i].item()
+
     return res.reshape(M.shape)
 
 
